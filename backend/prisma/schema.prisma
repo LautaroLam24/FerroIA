@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  OPERARIO
+}
+
+enum StockMovementType {
+  ENTRADA
+  VENTA
+}
+
+enum OrdenCompraEstado {
+  BORRADOR
+  CONFIRMADA
+  CANCELADA
+}
+
+enum OrdenCompraOrigen {
+  MANUAL
+  ASISTENTE
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role
+  deletedAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  stockMovements StockMovement[]
+  ordenesCompra  OrdenCompra[]
+
+  @@map("users")
+}
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products Product[]
+
+  @@map("categories")
+}
+
+model Supplier {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  contact   String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  products      Product[]
+  ordenesCompra OrdenCompra[]
+
+  @@map("suppliers")
+}
+
+model Product {
+  id          String    @id @default(uuid())
+  name        String
+  code        String    @unique
+  description String?
+  price       Decimal   @db.Decimal(10, 2)
+  stock       Int       @default(0)
+  stockMin    Int       @default(0)
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+
+  stockMovements   StockMovement[]
+  ordenCompraItems OrdenCompraItem[]
+
+  @@map("products")
+}
+
+model StockMovement {
+  id       String            @id @default(uuid())
+  type     StockMovementType
+  quantity Int
+  reason   String?
+  date     DateTime          @default(now())
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@map("stock_movements")
+}
+
+model OrdenCompra {
+  id        String            @id @default(uuid())
+  estado    OrdenCompraEstado @default(BORRADOR)
+  origen    OrdenCompraOrigen
+  createdAt DateTime          @default(now())
+
+  proveedorId String
+  proveedor   Supplier @relation(fields: [proveedorId], references: [id])
+
+  createdBy String
+  creador   User   @relation(fields: [createdBy], references: [id])
+
+  items OrdenCompraItem[]
+
+  @@map("ordenes_compra")
+}
+
+model OrdenCompraItem {
+  id               String @id @default(uuid())
+  cantidadSugerida Int
+
+  ordenCompraId String
+  ordenCompra   OrdenCompra @relation(fields: [ordenCompraId], references: [id], onDelete: Cascade)
+
+  productoId String
+  producto   Product @relation(fields: [productoId], references: [id])
+
+  @@map("orden_compra_items")
+}

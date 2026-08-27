@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+coverage/
+.env
+*.local
+chatbot/.venv/
+chatbot/chroma_db/
+chatbot/conversaciones/
+__pycache__/
+.pytest_cache/
+.playwright-mcp/
+/01-dashboard-wide.png
+/chat-open.png

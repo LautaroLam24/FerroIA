@@ -1,0 +1,42 @@
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://postgres:postgres@localhost:5432/ferreteria"
+      ]
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "engram": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "engram-mcp"
+      ]
+    },
+    "trello": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@delorenj/mcp-server-trello"
+      ],
+      "env": {
+        "TRELLO_API_KEY": "${TRELLO_API_KEY}",
+        "TRELLO_TOKEN": "${TRELLO_TOKEN}"
+      }
+    },
+    "_alternativa_jira": {
+      "_nota": "Si prefieren Jira: renombrar esta entrada a 'atlassian'. Es el server remoto OFICIAL de Atlassian (OAuth en el primer uso con /mcp). Tambien vale como MCP externo de la consigna.",
+      "type": "sse",
+      "url": "https://mcp.atlassian.com/v1/sse"
+    }
+  }
+}

@@ -1,0 +1,34 @@
+schema: spec-driven
+
+context: |
+  Sistema de gestión de inventario para ferretería/pinturería (TP Integrador UNLa 2026).
+  Stack: NestJS + TypeScript + Prisma + PostgreSQL (backend en /backend),
+  React + Vite + TypeScript (frontend en /frontend),
+  chatbot RAG en Python con LangChain + ChromaDB (en /chatbot).
+  Auth: JWT con roles ADMIN y OPERARIO.
+  Reglas normativas obligatorias en /.instructions.md: contrato { data }/{ error },
+  códigos 200/201/204/400/401/403/404/409, baja lógica de productos (deletedAt),
+  movimientos de stock inmutables, ventas/entradas SIEMPRE en prisma.$transaction
+  con validación de stock dentro de la transacción.
+  Módulo de IA obligatorio: CU09 asistente conversacional (LangChain + RAG sobre
+  ChromaDB con memoria de conversación ACOTADA por windowing/summarization de
+  tokens, integrado en la web) y CU10 búsqueda semántica de productos por
+  embeddings + sugerencia de reposición calculada POR CÓDIGO. Observaciones
+  docentes obligatorias: (a) sincronizar ChromaDB ante todo ABM de productos vía
+  eventos/hooks NestJS para evitar alucinaciones; (b) memoria del chatbot con
+  límite de tokens; (c) el asistente puede usar function calling para crear
+  BORRADORES de orden de compra (OrdenCompra estado BORRADOR), pero nunca
+  confirma órdenes ni modifica stock: eso es humano (CU06).
+  Los 10 casos de uso (CU01-CU10) del TP son la referencia funcional.
+  Convención: commits convencionales; tests obligatorios por change.
+
+rules:
+  proposal:
+    - Indicar qué casos de uso (CUxx) cubre el change
+    - Incluir sección "Non-goals" para acotar alcance
+  specs:
+    - Todo requirement con escenarios WHEN/THEN verificables por test o curl
+    - Cubrir siempre los casos de error (400/401/403/404/409) además del feliz
+  tasks:
+    - Tareas chicas y verificables (max ~2 horas cada una)
+    - La última task de todo change es ejecutar la verificación completa (tsc + lint + tests)

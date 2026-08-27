@@ -1,0 +1,61 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "read": {
+      "*": "allow",
+      ".env": "deny",
+      ".env.*": "deny",
+      "**/node_modules/**": "deny",
+      "**/dist/**": "deny",
+      "**/coverage/**": "deny",
+      ".git/**": "deny",
+      "chatbot/chroma_db/**": "deny",
+      "chatbot/conversaciones/**": "deny"
+    }
+  },
+  "mcp": {
+    "postgres": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://postgres:postgres@localhost:5432/ferreteria"
+      ],
+      "enabled": true
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "enabled": true
+    },
+    "engram": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "engram-mcp"
+      ],
+      "enabled": true,
+      "_nota": "Ajustar al comando real de tu instalación de Engram"
+    },
+    "trello": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@delorenj/mcp-server-trello"
+      ],
+      "environment": {
+        "TRELLO_API_KEY": "{env:TRELLO_API_KEY}",
+        "TRELLO_TOKEN": "{env:TRELLO_TOKEN}"
+      },
+      "enabled": true,
+      "_nota": "Server MCP EXTERNO (consigna). Key y token: https://trello.com/power-ups/admin -> exportarlos en tu shell. Alternativa Jira: server remoto oficial de Atlassian (ver .mcp.json)."
+    }
+  }
+}
