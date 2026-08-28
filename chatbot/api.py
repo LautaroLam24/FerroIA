@@ -4,16 +4,33 @@
 #
 # POST /chat { question, conversation_id?, user_id? } -> { conversation_id, answer }
 
+import os
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 import chat
 import products_index
 import restock_summary
 
-app = FastAPI(title="Chatbot RAG - Ferreteria/Pinturería")
+# Este servicio no tiene su propio control de acceso por usuario (esa lógica
+# vive en Nest, vía JwtAuthGuard/RolesGuard). Sin este chequeo, cualquiera que
+# alcance el puerto 8001 en la red podría llamar /chat u otros endpoints
+# directamente, sin pasar por Nest. Si la env var no está seteada, TODAS las
+# requests se rechazan (fail-closed) en vez de aceptar cualquier cosa.
+INTERNAL_TOKEN = os.getenv("CHATBOT_INTERNAL_TOKEN")
+
+
+def verify_internal_token(x_internal_token: Optional[str] = Header(default=None)) -> None:
+    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
+        raise HTTPException(status_code=401, detail="No autorizado")
+
+
+app = FastAPI(
+    title="Chatbot RAG - Ferreteria/Pinturería",
+    dependencies=[Depends(verify_internal_token)],
+)
 
 # La chain (retriever + prompt + llm) se arma una sola vez al levantar el
 # servicio, no en cada request (evita recargar el modelo de embeddings).
@@ -47,7 +64,12 @@ def post_chat(body: ChatRequest):
         conversation = chat.cargar_conversacion(body.conversation_id)
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
-        if body.user_id and not conversation.get("user_id"):
+        owner = conversation.get("user_id")
+        if owner and owner != body.user_id:
+            # No confirmar que la conversación existe: mismo 404 que "no
+            # encontrada" para no filtrar ids ajenos (evita IDOR).
+            raise HTTPException(status_code=404, detail="Conversación no encontrada")
+        if body.user_id and not owner:
             conversation["user_id"] = body.user_id
     else:
         conversation = chat.crear_conversacion(user_id=body.user_id)

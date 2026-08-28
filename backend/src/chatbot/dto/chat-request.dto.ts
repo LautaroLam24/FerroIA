@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class ChatRequestDto {
   @IsString({ message: 'La pregunta debe ser un texto' })
@@ -6,6 +6,6 @@ export class ChatRequestDto {
   question!: string;
 
   @IsOptional()
-  @IsString({ message: 'El identificador de conversación debe ser un texto' })
+  @IsUUID('4', { message: 'El identificador de conversación no es válido' })
   conversation_id?: string;
 }

@@ -5,8 +5,10 @@ import {
   HttpStatus,
   Post,
   Req,
+  UseGuards,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { AuthenticatedUser } from '../auth/jwt-payload.interface';
 import { ChatbotService } from './chatbot.service';
@@ -19,6 +21,8 @@ export class ChatbotController {
 
   @Post()
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   async chat(
     @Body() dto: ChatRequestDto,
     @Req()

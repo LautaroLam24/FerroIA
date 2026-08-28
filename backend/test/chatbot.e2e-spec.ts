@@ -110,13 +110,14 @@ describe('Chatbot (e2e)', () => {
   });
 
   it('segunda pregunta con el mismo conversation_id reutiliza el historial', async () => {
+    const conversationId = 'c0a80101-1234-4a5b-8c7d-1234567890ab';
     fetchMock
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
         json: () =>
           Promise.resolve({
-            conversation_id: 'conv-hilo-5678',
+            conversation_id: conversationId,
             answer: 'Solo el rol ADMIN puede dar de baja un producto.',
           }),
       })
@@ -125,7 +126,7 @@ describe('Chatbot (e2e)', () => {
         status: 200,
         json: () =>
           Promise.resolve({
-            conversation_id: 'conv-hilo-5678',
+            conversation_id: conversationId,
             answer: 'Lo puede hacer un usuario con rol ADMIN.',
           }),
       });
@@ -157,7 +158,7 @@ describe('Chatbot (e2e)', () => {
     const secondSentBody = JSON.parse(secondOptions.body as string) as {
       conversation_id?: string;
     };
-    expect(secondSentBody.conversation_id).toBe('conv-hilo-5678');
+    expect(secondSentBody.conversation_id).toBe(conversationId);
   });
 
   it('pregunta fuera de contexto responde que no tiene esa información', async () => {
@@ -203,8 +204,21 @@ describe('Chatbot (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/chatbot')
       .set('Authorization', `Bearer ${operarioToken}`)
-      .send({ question: 'hola', conversation_id: 'no-existe' })
+      .send({
+        question: 'hola',
+        conversation_id: '00000000-0000-4000-8000-000000000000',
+      })
       .expect(400);
+  });
+
+  it('conversation_id con formato inválido responde 400', async () => {
+    await request(app.getHttpServer())
+      .post('/api/chatbot')
+      .set('Authorization', `Bearer ${operarioToken}`)
+      .send({ question: 'hola', conversation_id: 'no-es-un-uuid' })
+      .expect(400);
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('sin token responde 401', async () => {

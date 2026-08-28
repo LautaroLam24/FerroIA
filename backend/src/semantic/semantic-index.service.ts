@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { chatbotInternalTokenHeader } from '../common/chatbot-internal-token.util';
 
 export interface IndexableProduct {
   id: string;
@@ -53,6 +54,10 @@ export class SemanticIndexService {
   private request(path: string, init: RequestInit = {}): Promise<Response> {
     return fetch(`${this.baseUrl()}${path}`, {
       ...init,
+      headers: {
+        ...chatbotInternalTokenHeader(this.configService),
+        ...init.headers,
+      },
       signal: AbortSignal.timeout(this.timeoutMs()),
     });
   }

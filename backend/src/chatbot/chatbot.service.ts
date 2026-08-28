@@ -4,6 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { chatbotInternalTokenHeader } from '../common/chatbot-internal-token.util';
 import { ChatRequestDto } from './dto/chat-request.dto';
 
 export interface ChatResult {
@@ -33,7 +34,10 @@ export class ChatbotService {
     try {
       response = await fetch(`${baseUrl}/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...chatbotInternalTokenHeader(this.configService),
+        },
         body: JSON.stringify({
           question: dto.question,
           conversation_id: dto.conversation_id,

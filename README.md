@@ -120,11 +120,39 @@ y SDD con OpenSpec (`openspec/`). Herramientas: OpenCode + Claude Code
   `openspec/specs/auth/spec.md`, archivado en
   `openspec/changes/archive/2026-08-04-auth-jwt/`.
 
-### `<nombre-change>` — _fecha_
-- **Prompt de propuesta:** _(pegar)_
-- **Ajustes humanos a la spec:** _(qué escenarios agregué/cambié y por qué)_
-- **Prompt de implementación y desvíos:** _(qué corrigió el loop de verificación)_
-- **Resultado:** tests verdes, escenarios verificados, archivado.
+### Auditoría de seguridad pre-entrega — 2026-08-28
+- **Prompt:** `@security` (subagente `security`, solo lectura) auditó todo
+  `backend/src/` + `chatbot/` con foco en JWT, roles (401 vs 403 por recurso),
+  validación de entrada, CORS, rate limiting, manejo de secretos y fuga de
+  `passwordHash`/stack traces. Reportó hallazgos agrupados por severidad; los
+  de riesgo medio/alto se corrigieron en la misma sesión.
+- **Hallazgos altos corregidos:**
+  - IDOR en conversaciones del chatbot: `chatbot/api.py` no verificaba que el
+    usuario autenticado fuera el dueño de la conversación antes de continuar
+    un `conversation_id` ajeno. Fix: chequeo de ownership (404 sin filtrar
+    existencia) + `@IsUUID('4')` en `ChatRequestDto`.
+  - El microservicio Python (`chatbot/api.py`) no autenticaba ninguna ruta
+    propia, confiaba solo en el perímetro de red. Fix: header compartido
+    `X-Internal-Token` (`CHATBOT_INTERNAL_TOKEN`) entre Nest y Python,
+    fail-closed si no está configurado.
+  - `CORS_ORIGIN` sin fail-fast podía derivar en `Access-Control-Allow-Origin: *`
+    silencioso si faltaba la env var. Fix: mismo patrón fail-fast que
+    `JWT_SECRET`.
+- **Hallazgos medios corregidos:** `JWT_EXPIRES_IN` fail-fast (tokens sin
+  `exp` si faltaba), rate limiting agregado a `POST /users`, `/chatbot` y
+  `/purchase-orders[/assistant]` (antes solo cubría `/auth/login`),
+  `SEED_ADMIN_PASSWORD` como placeholder real en `.env.example`,
+  `HttpExceptionFilter` pasado a catch-all (evita fuga de stack traces en
+  errores no controlados), algoritmo `HS256` explícito en `JwtStrategy`, y
+  `PATCH /api/products/:id` dejó de aceptar `stock` (pisaba el valor sin pasar
+  por la transacción de `StockMovement`, podía perder una venta concurrente en
+  silencio) — el modal de edición de `ProductsPage` ahora muestra el campo
+  Stock deshabilitado con la aclaración de que se ajusta desde Stock.
+- **Resultado:** `run-verify` verde en backend (tsc/lint/unit 118/unit
+  e2e 154) y frontend (tsc/lint/test 70) tras cada fix; verificación en vivo
+  del token interno (401 sin header, 200 con header correcto) y del rechazo
+  de `stock` en el PATCH. Hallazgos bajos quedaron documentados sin acción
+  (no bloqueantes para la entrega).
 
 ## 6. Servidores MCP utilizados
 

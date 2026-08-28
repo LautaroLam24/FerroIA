@@ -171,21 +171,23 @@ export function ProductsPage() {
     setFieldErrors({});
     setFormError(null);
     try {
-      const input = {
+      const shared = {
         name: form.name,
         code: form.code,
         description: form.description ? form.description : undefined,
         price: Number(form.price),
-        stock: Number(form.stock),
         stockMin: Number(form.stockMin),
         categoryId: form.categoryId,
         supplierId: form.supplierId,
       };
       if (editingId) {
-        await updateProduct(editingId, input);
+        // stock NO se manda al editar: se ajusta únicamente desde Stock
+        // (entradas/ventas), nunca pisando el valor directo (ver
+        // UpdateProductDto en el backend).
+        await updateProduct(editingId, shared);
         showToast('Producto actualizado', 'success');
       } else {
-        await createProduct(input);
+        await createProduct({ ...shared, stock: Number(form.stock) });
         showToast('Producto creado', 'success');
       }
       closeModal();
@@ -418,7 +420,16 @@ export function ProductsPage() {
             />
           </FormField>
           <div className="grid grid-cols-2 gap-4">
-            <FormField label="Stock" required error={fieldError(fieldErrors, 'stock')}>
+            <FormField
+              label="Stock"
+              required={!editingId}
+              error={fieldError(fieldErrors, 'stock')}
+              hint={
+                editingId
+                  ? 'Se ajusta desde Stock (entradas/ventas), no acá'
+                  : undefined
+              }
+            >
               <Input
                 name="stock"
                 type="number"
@@ -426,7 +437,8 @@ export function ProductsPage() {
                 step="1"
                 value={form.stock}
                 onChange={(event) => setForm({ ...form, stock: event.target.value })}
-                required
+                required={!editingId}
+                disabled={Boolean(editingId)}
               />
             </FormField>
             <FormField

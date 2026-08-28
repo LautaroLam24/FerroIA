@@ -1,5 +1,15 @@
-import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { OrdenCompraOrigen, Role } from '@prisma/client';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { AuthenticatedUser } from '../auth/jwt-payload.interface';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
@@ -11,6 +21,8 @@ export class PurchaseOrdersController {
   constructor(private readonly purchaseOrdersService: PurchaseOrdersService) {}
 
   @Post()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   async create(
     @Body() dto: CreatePurchaseOrderDto,
     @Req() req: { user: AuthenticatedUser },
@@ -25,6 +37,8 @@ export class PurchaseOrdersController {
   }
 
   @Post('assistant')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   async createFromAssistant(
     @Body() dto: CreatePurchaseOrderDto,
     @Req() req: { user: AuthenticatedUser },

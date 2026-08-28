@@ -202,7 +202,6 @@ export class ProductsService {
             description: dto.description,
           }),
           ...(dto.price !== undefined && { price: dto.price }),
-          ...(dto.stock !== undefined && { stock: dto.stock }),
           ...(dto.stockMin !== undefined && { stockMin: dto.stockMin }),
           ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
           ...(dto.supplierId !== undefined && { supplierId: dto.supplierId }),

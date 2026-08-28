@@ -317,6 +317,36 @@ describe('ProductsPage', () => {
     );
   });
 
+  it('el campo Stock queda deshabilitado al editar y no se envía en el PATCH', async () => {
+    const { updateProduct } = await import('../../api');
+    setupMock([makeProduct({ id: 'prod-e', name: 'Martillo', code: 'MART-001' })]);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Martillo')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }));
+
+    const stockInput = screen.getByLabelText(/^Stock\s*\*?$/) as HTMLInputElement;
+    expect(stockInput.disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText(/^Precio/), {
+      target: { value: '1600' },
+    });
+
+    updateProduct.mockResolvedValue(makeProduct({ price: '1600' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+    await waitFor(() => {
+      expect(updateProduct).toHaveBeenCalled();
+    });
+    const [, payload] = updateProduct.mock.calls[0] as [string, object];
+    expect(payload).not.toHaveProperty('stock');
+  });
+
   it('muestra el error 409 de código duplicado asociado al campo en el modal', async () => {
     const { ApiError, createProduct } = await import('../../api');
     setupMock([]);

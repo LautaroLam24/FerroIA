@@ -10,7 +10,7 @@ import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { JwtStrategy } from './jwt.strategy';
-import { getJwtSecretOrThrow } from './jwt-secret.util';
+import { getJwtExpiresInOrThrow, getJwtSecretOrThrow } from './jwt-secret.util';
 
 @Module({
   imports: [
@@ -21,8 +21,8 @@ import { getJwtSecretOrThrow } from './jwt-secret.util';
       useFactory: (configService: ConfigService) => ({
         secret: getJwtSecretOrThrow(configService),
         signOptions: {
-          expiresIn: configService.get<string>(
-            'JWT_EXPIRES_IN',
+          expiresIn: getJwtExpiresInOrThrow(
+            configService,
           ) as SignOptions['expiresIn'],
         },
       }),

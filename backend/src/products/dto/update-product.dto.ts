@@ -28,11 +28,10 @@ export class UpdateProductDto {
   @Min(0, { message: 'El precio no puede ser negativo' })
   price?: number;
 
-  @IsOptional()
-  @IsInt({ message: 'El stock debe ser un número entero' })
-  @Min(0, { message: 'El stock no puede ser negativo' })
-  stock?: number;
-
+  // stock (a diferencia de CreateProductDto) NO está acá a propósito: el
+  // stock actual solo se ajusta dentro de la transacción que crea un
+  // StockMovement (CU06/CU07, .instructions.md §2/§3) — un PATCH directo
+  // podía pisar en silencio una venta concurrente.
   @IsOptional()
   @IsInt({ message: 'El stock mínimo debe ser un número entero' })
   @Min(0, { message: 'El stock mínimo no puede ser negativo' })
