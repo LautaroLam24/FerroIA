@@ -8,35 +8,200 @@
 
 ## 1. Arquitectura del sistema
 
-_(Completar con diagrama: NestJS + Prisma + PostgreSQL / React + Vite / servicio RAG Python.)_
+Tres piezas independientes que se comunican por HTTP, sin memoria ni proceso
+compartido: un **backend NestJS** (con Prisma sobre PostgreSQL) que hace de
+única puerta de entrada — valida JWT/roles y expone `/api/**` —, un
+**frontend React + Vite** que solo habla con esa puerta, y un **servicio RAG
+en Python** (FastAPI) que el backend consume como un proveedor más, nunca al
+revés. El backend es quien decide qué puede hacer un usuario; el servicio
+Python no tiene su propio control de acceso por usuario, solo un secreto
+compartido (`X-Internal-Token`) que exige en todas sus rutas.
 
-## 2. Instalación (base de datos)
+```mermaid
+flowchart TB
+    FE["Frontend<br/>React + Vite + TS<br/>:5173"]
 
-1. Copiar `.env.example` a `backend/.env` (y ajustar `JWT_SECRET`, `GROQ_API_KEY`,
-   etc. según corresponda; ver también `chatbot/.env` para las variables del
-   servicio de IA).
-2. Levantar Postgres con Docker Compose:
+    subgraph Backend["Backend NestJS — :3000, prefijo /api"]
+        Guard["JwtAuthGuard + RolesGuard<br/>ADMIN / OPERARIO"]
+        Modules["auth · users · products · categories<br/>suppliers · stock · dashboard"]
+        ChatProxy["chatbot (proxy)"]
+        SemanticMod["semantic (proxy + listener)"]
+        PO["purchase-orders"]
+        Events["EventEmitter2<br/>product.created / updated / deleted"]
+    end
+
+    DB[("PostgreSQL<br/>vía Prisma")]
+
+    subgraph Python["Servicio RAG Python — FastAPI, :8001"]
+        API["api.py<br/>exige X-Internal-Token"]
+        Chat["chat.py<br/>RAG + tool-calling"]
+        Chroma[("ChromaDB<br/>negocio + products_catalog")]
+        Embed["sentence-transformers<br/>all-MiniLM-L6-v2"]
+    end
+
+    Groq["Groq API<br/>openai/gpt-oss-120b"]
+
+    FE -- "Bearer JWT" --> Guard
+    Guard --> Modules
+    Guard --> ChatProxy
+    Guard --> SemanticMod
+    Guard --> PO
+    Modules --> DB
+    SemanticMod --> DB
+    PO --> DB
+    Modules -- "emite eventos" --> Events
+    Events -- "index / reindex" --> API
+    ChatProxy -- "POST /chat<br/>X-Internal-Token + JWT del usuario" --> API
+    SemanticMod -- "search, restock/summary" --> API
+    API --> Chat
+    Chat --> Chroma
+    Chat --> Embed
+    Chat -- "LLM" --> Groq
+    Chat -- "tool crear_borrador_orden<br/>POST /api/purchase-orders/assistant<br/>Authorization: Bearer JWT del usuario humano" --> PO
+```
+
+Puntos de diseño que el diagrama resume (todos con su change de origen en
+README §5):
+
+- **Nest como puerta única**: el frontend nunca le pega al servicio Python
+  directamente; siempre pasa por el proxy autenticado de `chatbot`/`semantic`
+  en Nest, que agrega el header `X-Internal-Token` y aplica los mismos
+  guards de rol que cualquier otro endpoint (`chatbot-rag`, `busqueda-semantica`).
+- **Sincronización del índice por eventos, no por polling**: el ABM de
+  productos (`gestion-productos`) emite `product.created/updated/deleted`
+  vía `EventEmitter2`; un listener en `semantic` reindexa o borra el
+  documento correspondiente en ChromaDB de forma no bloqueante (un fallo del
+  listener nunca rompe la respuesta del ABM). `npm run reindex:semantic`
+  reconstruye el índice completo si se desincroniza (`busqueda-semantica`).
+- **La tool del asistente reenvía el JWT humano**: `crear_borrador_orden`
+  (`ordenes-compra-borrador`) no usa una identidad de servicio propia — Nest
+  reenvía el JWT del usuario de la conversación hasta el servicio Python, que
+  lo usa para llamar de vuelta a `POST /api/purchase-orders/assistant` como
+  si lo hiciera ese mismo usuario, sujeto a los mismos guards.
+- **El índice nunca es la fuente de verdad**: `GET /api/products/semantic`
+  resuelve los ids que devuelve Chroma contra Postgres y filtra `deletedAt`
+  antes de responder — un producto dado de baja no puede aparecer aunque el
+  índice tenga lag.
+- **LLM real**: Groq, modelo `openai/gpt-oss-120b` (ver §2.5 para el porqué).
+
+## 2. Instalación y ejecución
+
+Pasos para levantar el sistema completo desde cero (Postgres + backend +
+frontend + servicio RAG Python) sin conocimiento previo del repo.
+
+### 2.1 Variables de entorno
+
+1. Backend: copiar `backend/.env.example` a `backend/.env` y como mínimo
+   cambiar `JWT_SECRET` y `CHATBOT_INTERNAL_TOKEN` (cualquier valor propio,
+   no dejar el placeholder `cambiame` — arranca en fail-fast si falta
+   `JWT_SECRET`/`CORS_ORIGIN`, ver README §5 - Auditoría de seguridad).
+2. Chatbot (servicio Python): copiar `chatbot/.env.example` a `chatbot/.env`.
+   `CHATBOT_INTERNAL_TOKEN` en este archivo tiene que ser **idéntico** al de
+   `backend/.env` (es el secreto compartido del header `X-Internal-Token`;
+   sin esto todas las requests del backend al servicio Python son
+   rechazadas). Para usar el LLM real (ver nota de modelo en 2.5) setear
+   `LLM_PROVIDER=groq` y `GROQ_API_KEY=<tu key>`; sin `GROQ_API_KEY` el
+   default (`LLM_PROVIDER=ollama`) requiere tener Ollama corriendo local con
+   el modelo `llama3.2`, fuera del alcance de esta guía.
+3. Frontend: `frontend/.env.example` ya trae
+   `VITE_API_URL=http://localhost:3000/api`, que coincide con el backend de
+   más abajo — no hace falta tocarlo salvo que cambies el puerto del backend.
+
+### 2.2 Base de datos (Docker Compose)
+
+1. Levantar Postgres:
 
    ```bash
    docker compose up -d
    ```
 
-   Esto levanta Postgres 16 en `localhost:5432` con las mismas credenciales de
-   `DATABASE_URL` en `.env.example` (user/pass `postgres`, db `ferreteria`) y
-   volumen persistente (`ferreteria_db_data`). Esperar a que el servicio quede
+   Esto levanta Postgres 16 en `localhost:5432` con las mismas credenciales
+   de `DATABASE_URL` (user/pass `postgres`, db `ferreteria`) y volumen
+   persistente (`ferreteria_db_data`). Esperar a que el servicio quede
    `healthy`:
 
    ```bash
    docker compose ps
    ```
 
-3. Aplicar las migraciones existentes y cargar el seed inicial (usuario `ADMIN`):
+2. Aplicar las migraciones existentes y cargar el seed inicial (usuario
+   `ADMIN`, con `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` de `backend/.env`):
 
    ```bash
    cd backend
    npx prisma migrate deploy
    npx prisma db seed
    ```
+
+### 2.3 Backend (NestJS)
+
+```bash
+cd backend
+npm install
+npm run start:dev
+```
+
+Queda escuchando en `http://localhost:3000/api` (prefijo global `/api`,
+salvo `/health`). Falla rápido al arrancar si falta `JWT_SECRET` o
+`CORS_ORIGIN` en `backend/.env`.
+
+### 2.4 Frontend (React + Vite)
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Sirve en `http://localhost:5173`. Login con el usuario ADMIN del seed
+(`SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` de `backend/.env`).
+
+### 2.5 Servicio RAG Python (chatbot + búsqueda semántica)
+
+```bash
+cd chatbot
+python -m venv .venv
+.venv\Scripts\activate        # Windows; en Linux/Mac: source .venv/bin/activate
+pip install -r requirements.txt
+python ingest.py              # indexa docs-negocio.md en ChromaDB (RAG del chatbot)
+uvicorn api:app --reload --port 8001
+```
+
+`--reload` es recomendado en desarrollo: sin él, un proceso viejo sigue
+respondiendo con código desactualizado sin ningún error obvio (ver
+ESTADO.md - Decisiones). El puerto (`8001`) tiene que coincidir con
+`CHATBOT_URL` de `backend/.env`.
+
+**Modelo LLM:** el proveedor validado end-to-end en este proyecto es Groq
+(`LLM_PROVIDER=groq` en `chatbot/.env`). Sin `LLM_MODEL` explícito,
+`get_llm()` (`chatbot/chat.py`) usa `openai/gpt-oss-120b` por default — es
+el modelo vigente porque `llama-3.3-70b-versatile` (el reemplazo oficial no
+deprecado de `llama3-70b-8192`, que sí fue dado de baja) quedó en tier
+Enterprise de Groq y no es accesible con una API key de tier gratuito
+(confirmado contra la API real de Groq, ver README §5 - `chatbot-rag`).
+`openai/gpt-oss-120b` sí está disponible en el tier gratuito y es el que se
+usó para verificar CU09 y el function calling de `ordenes-compra-borrador`
+end-to-end.
+
+### 2.6 Índice semántico del catálogo (CU10, opcional para probar de una)
+
+El índice de búsqueda semántica (`products_catalog` en ChromaDB) se
+sincroniza automáticamente con cada alta/edición/baja de producto (evento
+`product.*` → listener en `backend/src/semantic/`), pero arranca vacío. Para
+reindexar todo el catálogo existente de una sola vez (carga inicial o
+recuperación ante desincronización):
+
+```bash
+cd backend
+npm run reindex:semantic
+```
+
+### 2.7 Verificar
+
+- Login en `http://localhost:5173` con el ADMIN del seed.
+- `GET http://localhost:3000/health` → `200` sin autenticar.
+- Preguntarle algo al asistente (`ChatWidget`, ícono flotante) y confirmar
+  que responde usando `chatbot/docs-negocio.md` como contexto.
 
 ## 3. Los 10 casos de uso
 
@@ -61,10 +226,112 @@ Pantallas transversales de UI (no mapean a un único CU, ver bitácora):
 
 ## 4. AI Engineering — estructura de governance
 
-Jerarquía en `/.opencode/HIERARCHY.md`. Piezas: `.instructions.md` (normativo),
-`AGENTS.md`/`CLAUDE.md` (contexto), skills, subagentes read-only, MCP servers,
-y SDD con OpenSpec (`openspec/`). Herramientas: OpenCode + Claude Code
-(matriz de uso y handoff en `AI_WORKFLOW.md`).
+### 4.1 Jerarquía de documentos (orden de autoridad, `.opencode/HIERARCHY.md`)
+
+1. **`.instructions.md`** — reglas normativas obligatorias; prevalece ante
+   cualquier conflicto con otro documento.
+2. **`AGENTS.md` / `CLAUDE.md`** — contexto del proyecto (`CLAUDE.md` es un
+   stub que apunta a `AGENTS.md`).
+3. **`openspec/specs/**`** — specs principales: QUÉ hace el sistema, fuente
+   de verdad funcional.
+4. **`.opencode/skills/**` / `.claude/skills/**`** — procedimientos por
+   tarea, mismo contenido espejado en ambos lados (hay que editar los dos si
+   se toca uno).
+5. **`.opencode/agents/*` / `.claude/agents/*`** — subagentes especializados
+   y sus permisos (ver 4.4).
+6. **`ESTADO.md`** — snapshot del proyecto, se lee primero en cada sesión
+   pero no define reglas: si contradice un nivel superior está
+   desactualizado y se corrige.
+7. **`AI_README.md` / `AI_WORKFLOW.md`** — onboarding y proceso, para
+   humanos, la IA no los consume como reglas.
+
+### 4.2 SDD con OpenSpec
+
+Ninguna feature se implementa sin un change de OpenSpec aprobado por un
+humano (`.instructions.md §9`). Ciclo real seguido en los 16 changes
+archivados de este repo (detalle prompt-por-prompt en README §5):
+
+1. **Proponer** (`/opsx-propose`): genera `proposal.md` + `design.md` +
+   `specs/` (delta con escenarios WHEN/THEN) + `tasks.md` a partir de un
+   pedido en lenguaje natural.
+2. **Revisar como humano**: leer los 4 artefactos y ajustar escenarios
+   ANTES de implementar — este paso no se delega. En la práctica, en los 16
+   changes de este repo esa revisión aprobó los artefactos tal cual los
+   generó `/opsx-propose` (ver "Ajustes humanos a la spec" de cada entrada
+   de README §5: "ninguno" / "sin ajustes registrados" en las 16).
+3. **Implementar** (`/opsx-apply <change>`): ejecuta `tasks.md` tarea por
+   tarea, en cambios chicos y verificables.
+4. **Loop de autocorrección** (skill `run-verify`): `npx tsc --noEmit &&
+   npm run lint && npm run test` en backend y frontend (+ `test:e2e` cuando
+   aplica) después de cada bloque de tareas. Si algo falla, la sesión se
+   detiene, explica archivo/línea y corrige antes de seguir (`.instructions.md
+   §8`) — no avanza con algo roto. Este loop encontró y corrigió desvíos
+   reales no anticipados en la spec original; los casos más documentados en
+   README §5 son `auth-jwt` (exception filter faltante, tipo de
+   `JWT_EXPIRES_IN`, lint de tests e2e, rate limit demasiado bajo, fixture de
+   test faltante, warning de Fast Refresh) y `busqueda-semantica` (un
+   escenario e2e se movió a unit porque la DB de dev es compartida entre
+   suites). La auditoría de `pulido-accesibilidad` jugó un rol equivalente
+   pero por lectura de código en vez de por fallo de `tsc`/`lint`: encontró
+   pantallas que la spec daba por migradas y no lo estaban (`Login.tsx`,
+   `PurchaseOrdersPage.tsx`).
+5. **Auditar** en features sensibles (auth, stock, entrega): subagente
+   `@security` (solo lectura) — usado en la auditoría de seguridad
+   pre-entrega (README §5), 3 hallazgos altos + 6 medios corregidos.
+6. **Archivar** (`/opsx-archive <change>`): sincroniza `openspec/specs/` y
+   mueve el change a `openspec/changes/archive/`.
+7. **Tablero** (skill `sync-tablero`): mueve la tarjeta de Trello del change
+   a "Hecho" (ver 4.4 y §6).
+8. **Estado** (skill `update-estado`): comprime `ESTADO.md` para que la
+   próxima sesión no tenga que releer todo el repo.
+9. **Bitácora**: se anota en este README (§5) el prompt de propuesta real y
+   los desvíos que corrigió el loop.
+
+### 4.3 Matriz OpenCode / Claude Code
+
+Playbook completo en `AI_WORKFLOW.md` (matriz de decisión + protocolo de
+handoff). Regla de ruteo declarada ahí (economía de tokens: OpenCode para lo
+simple/exploratorio, Claude Code para lo complejo/multi-archivo), con la
+tabla de ejemplo original:
+
+| Claude Code | OpenCode |
+|---|---|
+| Fase 0 bootstrap · `auth-jwt` · `gestion-productos` · `movimientos-stock` · `chatbot-rag` | `gestion-usuarios` · `categorias-proveedores` · `busqueda-filtros` · `dashboard` |
+
+`ESTADO.md` (Decisiones vigentes) registra el ruteo real, ya extendido más
+allá de esa tabla de ejemplo: **Claude Code** = `auth`, `productos`, `stock`,
+`chatbot`, `semántica`, `purchase-orders` (es decir, además de los 4 de
+arriba: `busqueda-semantica`, `ordenes-compra-borrador`, y —confirmado en
+README §5 por estar marcado explícitamente en `ESTADO.md`— `pulido-accesibilidad`
+y la auditoría de seguridad). **OpenCode** = `usuarios`, `catálogo`,
+`filtros`, `dashboard`, `design-system`, `layout-navegacion`,
+`pantallas-crud`, `stock-y-dashboard`. `chat-y-semantica` no tiene la
+herramienta que lo implementó registrada en ESTADO.md (ver la nota de
+auditoría en su entrada de README §5) — no se afirma acá para no inventar.
+Regla de escape declarada en `AI_WORKFLOW.md`: 2-3 intentos fallidos de
+`run-verify` sobre lo mismo en OpenCode → handoff a Claude Code, con este
+contexto mínimo:
+
+```text
+Objetivo: <resultado esperado>
+Change OpenSpec: <nombre> (estado: proposal aprobada / tasks 3-7 pendientes)
+Archivos: <qué puede tocar y qué no>
+Restricciones: seguir /.instructions.md
+Verificación: npx tsc --noEmit && npm run lint && npm run test
+```
+
+Límite conocido (`AI_WORKFLOW.md §5`): OpenCode y Claude Code no comparten
+memoria de sesión nativa; la consistencia entre ambos se sostiene por los
+documentos compartidos (`ESTADO.md`, `AGENTS.md`, `openspec/`) — ver §6 sobre
+por qué esto no terminó apoyándose en Engram como se había previsto.
+
+### 4.4 Subagentes read-only (`.opencode/agents/` y `.claude/agents/`)
+
+| `@` | Función | Permisos |
+|---|---|---|
+| `@security` | Audita JWT, roles, validación, CORS, secretos | solo lectura |
+| `@test-writer` | Genera tests unit/e2e siguiendo los patrones del repo | sin bash |
+| `@api-explorer` | Documenta endpoints con ejemplos curl | solo lectura |
 
 ## 5. Bitácora por change (prompts clave, iteraciones, correcciones)
 
@@ -642,12 +909,17 @@ y SDD con OpenSpec (`openspec/`). Herramientas: OpenCode + Claude Code
 
 ## 6. Servidores MCP utilizados
 
-| Servidor | Tipo | Rol |
-|----------|------|-----|
-| postgres | local | Inspección de schema/datos para queries y migraciones |
-| sequential-thinking | local | Diseño de transacciones/concurrencia |
-| engram | local | Memoria persistente de decisiones |
-| trello | **externo** | Tablero del TP sincronizado con changes |
+Configurados en `.mcp.json` (Claude Code) / `opencode.json` (OpenCode), mismo
+set en ambos. Estado real de cada uno al cierre del TP — **sin disimular** lo
+que no se llegó a demostrar:
+
+| Servidor | Conexión (`.mcp.json`) | Rol en el desarrollo | Estado |
+|---|---|---|---|
+| `postgres` | local, stdio — `npx @modelcontextprotocol/server-postgres postgresql://postgres:postgres@localhost:5432/ferreteria` | Inspeccionar schema y datos reales de la DB de dev al diseñar queries/migraciones y diagnosticar bugs | **Demostrado funcionando.** Ejemplo registrado: diagnosticó que la tabla `users` estaba vacía tras archivar `auth-jwt` (el seed nunca se había corrido contra la DB de dev) — ver README §5 |
+| `sequential-thinking` | local, stdio — `npx @modelcontextprotocol/server-sequential-thinking` | Desglosar en pasos encadenados decisiones de diseño con varias alternativas — pensado para transacciones/concurrencia (p. ej. el mecanismo de `updateMany` condicional de `movimientos-stock`, alternativas descartadas documentadas en su `design.md`) | **Demostrado funcionando** en el diseño de concurrencia del proyecto |
+| `trello` | externo, `npx @delorenj/mcp-server-trello`, credenciales `TRELLO_API_KEY`/`TRELLO_TOKEN` por env | Tablero del TP sincronizado con el ciclo de vida de los changes de OpenSpec (skill `sync-tablero`) | **Demostrado funcionando.** Board "TP Ferretería" con 5 listas y una tarjeta por change archivado (`shortUrl`: https://trello.com/b/6g2KOvgb). Tuvo un incidente real diagnosticado y resuelto (`TRELLO_TOKEN` con un `\n` embebido en la env var de Windows causaba `401` pese a key/token válidos, ver ESTADO.md 2026-08-24) |
+| `engram` | local, stdio — `npx engram-mcp` | Memoria persistente de decisiones, pensada para compartir contexto entre OpenCode y Claude Code (que no comparten sesión nativa), según `.opencode/HIERARCHY.md` | **Declarado en la config, no verificado end-to-end.** No hay en `ESTADO.md` ni en README §5 ningún registro de una decisión efectivamente guardada o leída desde Engram durante el desarrollo. En la práctica, la consistencia entre OpenCode y Claude Code se sostuvo por los documentos compartidos (`ESTADO.md`, `AGENTS.md`, `openspec/`), no por Engram — la sesión que redactó esta sección incluso encontró el server caído (`CONNECTION_CLOSED`) al intentar usarlo |
+| `atlassian` (Jira) | remoto SSE, `https://mcp.atlassian.com/v1/sse` (declarado como `_alternativa_jira`, deshabilitado en `.mcp.json`) | Alternativa a Trello para el MCP externo de la consigna | No usado — el proyecto usó Trello en su lugar |
 
 ## 7. Chatbot integrado
 
