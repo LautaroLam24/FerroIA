@@ -3,9 +3,6 @@
 **Curso:** Software Architecture y AI Agents — UNLa 2026
 **Alumno:** Lautaro Lamaita — lautarolamaita@gmail.com — GitHub: LautaroLam24
 
-> Este README es la bitácora y justificación del proceso de AI Engineering
-> (criterio 3 de la consigna). Se actualiza al cierre de cada change.
-
 ## 1. Arquitectura del sistema
 
 Tres piezas independientes que se comunican por HTTP, sin memoria ni proceso
