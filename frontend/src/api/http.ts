@@ -48,7 +48,13 @@ async function rawRequest<T>(
   }
 
   const response = await fetch(`${API_URL}${path}`, { ...options, headers });
-  const body = (await response.json()) as ApiSuccess<T> | ApiErrorBody;
+  // 204 No Content (DELETE de products/categories/suppliers/users) no manda
+  // body: response.json() sobre un body vacío tira SyntaxError, así que ni
+  // siquiera llega al chequeo de response.ok de más abajo.
+  const body: ApiSuccess<T> | ApiErrorBody =
+    response.status === 204
+      ? ({ data: undefined as T })
+      : ((await response.json()) as ApiSuccess<T> | ApiErrorBody);
 
   if (!response.ok) {
     const errorBody = body as ApiErrorBody;

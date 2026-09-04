@@ -62,4 +62,16 @@ describe('http client', () => {
 
     expect(result).toEqual(body);
   });
+
+  it('resolves a 204 No Content response instead of parsing an empty body as JSON', async () => {
+    // DELETE /api/products|categories|suppliers/:id y /api/users/:id
+    // responden 204 sin body (HttpStatus.NO_CONTENT). response.json() sobre
+    // un body vacío tira SyntaxError si no se lo trata como caso especial —
+    // ver http.ts. Regresión del bug real donde el toast mostraba "Ocurrió
+    // un error inesperado" en un delete que en realidad ya había persistido.
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(http.delete('/products/prod-1')).resolves.toBeUndefined();
+  });
 });
